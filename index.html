@@ -59,13 +59,10 @@ textarea::placeholder{color:var(--ink3);font-style:italic;}
 .btn-primary:disabled{opacity:0.5;cursor:not-allowed;}
 .btn-ghost{background:transparent;color:var(--ink2);border:1px solid var(--rule);}
 .btn-ghost:hover{border-color:var(--ink3);background:var(--rule);}
-.btn-danger{background:transparent;color:var(--ink3);border:1px solid var(--rule);margin-left:auto;}
-.btn-danger:hover{color:var(--accent);border-color:var(--accent);}
 .status-msg{font-family:'IBM Plex Mono',monospace;font-size:12px;padding:12px 16px;border-radius:2px;display:none;margin-top:12px;line-height:1.7;white-space:pre-wrap;}
 .status-msg.show{display:block;}
 .status-msg.ok{background:var(--success-bg);color:var(--success);border-left:3px solid var(--success);}
 .status-msg.err{background:#fdf0ec;color:var(--accent);border-left:3px solid var(--accent);}
-.status-msg.loading{background:var(--paper);color:var(--ink3);border-left:3px solid var(--rule);}
 .progress-wrap{display:none;margin-top:14px;}
 .progress-wrap.show{display:block;}
 .progress-steps{display:flex;flex-direction:column;gap:8px;}
@@ -91,6 +88,7 @@ textarea::placeholder{color:var(--ink3);font-style:italic;}
     <span class="edition-tag accent" id="week-display"></span>
   </div>
 
+  <!-- Anthropic API Key パネル -->
   <div class="config-panel">
     <div class="config-toggle" onclick="togglePanel('anthropic')">
       <div class="config-toggle-left">
@@ -105,31 +103,28 @@ textarea::placeholder{color:var(--ink3);font-style:italic;}
         <input class="config-input" type="password" id="anthropic-key" placeholder="sk-ant-xxxxxxxxxxxx" oninput="saveConfig()" />
       </div>
       <p class="config-hint">
-        <a href="https://console.anthropic.com/settings/keys" target="_blank">Anthropic Console</a> で取得。ブラウザ内のみで保持されます（外部送信なし）。<br>
-        Claude がNotion APIを代わりに叩くので CORS エラーが起きません。
+        <a href="https://console.anthropic.com/settings/keys" target="_blank">Anthropic Console</a> で取得。ブラウザ内のみで保持されます。
       </p>
     </div>
   </div>
 
+  <!-- Notion設定パネル（Database IDのみ・Tokenは不要） -->
   <div class="config-panel">
     <div class="config-toggle" onclick="togglePanel('notion')">
       <div class="config-toggle-left">
         <div class="config-dot" id="notion-dot"></div>
-        <span class="config-label-text">Notion Integration</span>
+        <span class="config-label-text">Notion Database ID</span>
       </div>
       <span class="config-arrow" id="notion-arrow">▼</span>
     </div>
     <div class="config-body" id="notion-body">
       <div class="config-row">
-        <span class="config-key">Token</span>
-        <input class="config-input" type="password" id="notion-token" placeholder="secret_xxxxxxxxxxxx" oninput="saveConfig()" />
-      </div>
-      <div class="config-row">
         <span class="config-key">Database ID</span>
         <input class="config-input" type="text" id="notion-db" placeholder="32桁のID" oninput="saveConfig()" />
       </div>
       <p class="config-hint">
-        <a href="https://www.notion.so/my-integrations" target="_blank">Notion Integrations</a> でトークン取得 → Database に接続 → URL の notion.so/<b>ここ</b>?v= が ID
+        NotionのデータベースURL: notion.so/<b>ここの部分</b>?v= がID。<br>
+        ※ Tokenは Cloudflare Worker の環境変数に設定済みのため不要です。
       </p>
     </div>
   </div>
@@ -182,188 +177,260 @@ textarea::placeholder{color:var(--ink3);font-style:italic;}
 
   <div class="progress-wrap" id="progress-wrap">
     <div class="progress-steps">
-      <div class="progress-step"><div class="step-dot" id="step1-dot"></div><span id="step1-label">Sending to Claude...</span></div>
-      <div class="progress-step"><div class="step-dot" id="step2-dot"></div><span id="step2-label">Claude is formatting the log...</span></div>
-      <div class="progress-step"><div class="step-dot" id="step3-dot"></div><span id="step3-label">Saving to Notion...</span></div>
+      <div class="progress-step"><div class="step-dot" id="step1-dot"></div><span>Sending to Claude...</span></div>
+      <div class="progress-step"><div class="step-dot" id="step2-dot"></div><span>Claude is formatting the log...</span></div>
+      <div class="progress-step"><div class="step-dot" id="step3-dot"></div><span>Saving to Notion...</span></div>
     </div>
   </div>
   <div class="status-msg" id="status"></div>
 </div>
 
 <script>
-const NOW=new Date();
-const DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-document.getElementById('date-display').textContent=`${MONTHS[NOW.getMonth()]} ${NOW.getDate()}, ${NOW.getFullYear()}`;
-document.getElementById('day-display').textContent=DAYS[NOW.getDay()];
-document.getElementById('week-display').textContent=`Week ${Math.ceil(NOW.getDate()/7)} of ${MONTHS[NOW.getMonth()]}`;
+// ★ここにWorkerのURLを入れる
+const WORKER_URL = 'https://YOUR_WORKER_URL';
 
-const FIELDS=[['standup-report','standup-report-ct'],['standup-meeting','standup-meeting-ct'],['tasks','tasks-ct'],['questions','questions-ct'],['learnings','learnings-ct'],['memo','memo-ct']];
-FIELDS.forEach(([id,ctId])=>{
-  document.getElementById(id).addEventListener('input',()=>{
-    document.getElementById(ctId).textContent=document.getElementById(id).value.length;
+const NOW = new Date();
+const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+document.getElementById('date-display').textContent = `${MONTHS[NOW.getMonth()]} ${NOW.getDate()}, ${NOW.getFullYear()}`;
+document.getElementById('day-display').textContent = DAYS[NOW.getDay()];
+document.getElementById('week-display').textContent = `Week ${Math.ceil(NOW.getDate()/7)} of ${MONTHS[NOW.getMonth()]}`;
+
+const FIELDS = [
+  ['standup-report','standup-report-ct'],
+  ['standup-meeting','standup-meeting-ct'],
+  ['tasks','tasks-ct'],
+  ['questions','questions-ct'],
+  ['learnings','learnings-ct'],
+  ['memo','memo-ct'],
+];
+FIELDS.forEach(([id, ctId]) => {
+  document.getElementById(id).addEventListener('input', () => {
+    document.getElementById(ctId).textContent = document.getElementById(id).value.length;
     saveDraft();
   });
 });
 
-const panelState={anthropic:false,notion:false};
-function togglePanel(name){
-  panelState[name]=!panelState[name];
-  const open=panelState[name];
-  document.getElementById(name+'-body').classList.toggle('open',open);
-  document.getElementById(name+'-arrow').classList.toggle('open',open);
+const panelState = { anthropic: false, notion: false };
+function togglePanel(name) {
+  panelState[name] = !panelState[name];
+  const open = panelState[name];
+  document.getElementById(name + '-body').classList.toggle('open', open);
+  document.getElementById(name + '-arrow').classList.toggle('open', open);
 }
 
-const CFG_KEY='dlg2-cfg', DRAFT_KEY='dlg2-draft';
-function saveConfig(){
-  localStorage.setItem(CFG_KEY,JSON.stringify({
-    anthropicKey:document.getElementById('anthropic-key').value,
-    notionToken:document.getElementById('notion-token').value,
-    notionDb:document.getElementById('notion-db').value,
+const CFG_KEY = 'dlg2-cfg', DRAFT_KEY = 'dlg2-draft';
+
+function saveConfig() {
+  localStorage.setItem(CFG_KEY, JSON.stringify({
+    anthropicKey: document.getElementById('anthropic-key').value,
+    notionDb: document.getElementById('notion-db').value,
   }));
   updateDots();
 }
-function loadConfig(){
-  try{
-    const c=JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
-    if(c.anthropicKey)document.getElementById('anthropic-key').value=c.anthropicKey;
-    if(c.notionToken)document.getElementById('notion-token').value=c.notionToken;
-    if(c.notionDb)document.getElementById('notion-db').value=c.notionDb;
+
+function loadConfig() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
+    if (c.anthropicKey) document.getElementById('anthropic-key').value = c.anthropicKey;
+    if (c.notionDb) document.getElementById('notion-db').value = c.notionDb;
     updateDots();
-  }catch(e){}
-}
-function updateDots(){
-  const ak=document.getElementById('anthropic-key').value;
-  const nt=document.getElementById('notion-token').value;
-  const nd=document.getElementById('notion-db').value;
-  document.getElementById('anthropic-dot').classList.toggle('ok',!!ak);
-  document.getElementById('notion-dot').classList.toggle('ok',!!(nt&&nd));
-}
-function saveDraft(){
-  const d={};FIELDS.forEach(([id])=>d[id]=document.getElementById(id).value);
-  localStorage.setItem(DRAFT_KEY,JSON.stringify(d));
-}
-function loadDraft(){
-  try{
-    const d=JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}');
-    FIELDS.forEach(([id,ctId])=>{if(d[id]){document.getElementById(id).value=d[id];document.getElementById(ctId).textContent=d[id].length;}});
-  }catch(e){}
-}
-function setStatus(type,msg){const el=document.getElementById('status');el.className='status-msg show '+type;el.textContent=msg;}
-function clearStatus(){const el=document.getElementById('status');el.className='status-msg';el.textContent='';}
-function setStep(n,state){document.getElementById('step'+n+'-dot').className='step-dot '+state;}
-function showProgress(show){
-  document.getElementById('progress-wrap').classList.toggle('show',show);
-  if(!show)[1,2,3].forEach(i=>setStep(i,''));
+  } catch(e) {}
 }
 
-async function runSave(){
+function updateDots() {
+  const ak = document.getElementById('anthropic-key').value;
+  const nd = document.getElementById('notion-db').value;
+  document.getElementById('anthropic-dot').classList.toggle('ok', !!ak);
+  document.getElementById('notion-dot').classList.toggle('ok', !!nd);
+}
+
+function saveDraft() {
+  const d = {};
+  FIELDS.forEach(([id]) => d[id] = document.getElementById(id).value);
+  localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+}
+
+function loadDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}');
+    FIELDS.forEach(([id, ctId]) => {
+      if (d[id]) {
+        document.getElementById(id).value = d[id];
+        document.getElementById(ctId).textContent = d[id].length;
+      }
+    });
+  } catch(e) {}
+}
+
+function setStatus(type, msg) {
+  const el = document.getElementById('status');
+  el.className = 'status-msg show ' + type;
+  el.textContent = msg;
+}
+function clearStatus() {
+  const el = document.getElementById('status');
+  el.className = 'status-msg';
+  el.textContent = '';
+}
+function setStep(n, state) {
+  document.getElementById('step' + n + '-dot').className = 'step-dot ' + state;
+}
+function showProgress(show) {
+  document.getElementById('progress-wrap').classList.toggle('show', show);
+  if (!show) [1,2,3].forEach(i => setStep(i, ''));
+}
+
+// ブロック生成関数（runSaveの外で定義）
+function buildBlocks(p) {
+  const sect = (emoji, label, text) => (!text || text === '(なし)') ? [] : [
+    { object:'block', type:'heading_3', heading_3:{ rich_text:[{ type:'text', text:{ content:`${emoji} ${label}` } }] } },
+    { object:'block', type:'paragraph', paragraph:{ rich_text:[{ type:'text', text:{ content: text } }] } },
+    { object:'block', type:'divider', divider:{} },
+  ];
+  return [
+    p.summary ? { object:'block', type:'callout', callout:{ rich_text:[{ type:'text', text:{ content: p.summary } }], icon:{ emoji:'📋' } } } : null,
+    p.summary ? { object:'block', type:'divider', divider:{} } : null,
+    ...sect('📢', 'Standup — To Report', p.standup_report),
+    ...sect('📋', 'Standup — Meeting Notes', p.standup_meeting),
+    ...sect('✅', 'Tasks Completed', p.tasks),
+    ...sect('❓', 'To Investigate', p.questions),
+    ...sect('💡', 'Knowledge Gained', p.learnings),
+    ...sect('💬', 'Memo', p.memo),
+  ].filter(Boolean);
+}
+
+async function runSave() {
   clearStatus();
-  const apiKey=document.getElementById('anthropic-key').value.trim();
-  const notionToken=document.getElementById('notion-token').value.trim();
-  const notionDb=document.getElementById('notion-db').value.trim().replace(/-/g,'');
-  if(!apiKey){if(!panelState.anthropic)togglePanel('anthropic');setStatus('err','⚠ Anthropic API Key を設定してください。');return;}
-  if(!notionToken||!notionDb){if(!panelState.notion)togglePanel('notion');setStatus('err','⚠ Notion Token と Database ID を設定してください。');return;}
-  const values={};FIELDS.forEach(([id])=>values[id]=document.getElementById(id).value.trim());
-  if(!FIELDS.some(([id])=>values[id])){setStatus('err','⚠ 何か入力してください。');return;}
-  const dateStr=document.getElementById('date-display').textContent;
-  const btn=document.getElementById('save-btn');
-  btn.disabled=true;showProgress(true);
 
-  // Step 1: Claude
-  setStep(1,'active');
-  const prompt=`以下は${dateStr}の日次ログです。各セクションの内容を整理・補完し、以下のJSONのみを返してください（コードブロック不要）:
+  const apiKey = document.getElementById('anthropic-key').value.trim();
+  const notionDb = document.getElementById('notion-db').value.trim().replace(/-/g, '');
+
+  // バリデーション
+  if (!apiKey) {
+    if (!panelState.anthropic) togglePanel('anthropic');
+    setStatus('err', '⚠ Anthropic API Key を設定してください。');
+    return;
+  }
+  if (!notionDb) {
+    if (!panelState.notion) togglePanel('notion');
+    setStatus('err', '⚠ Notion Database ID を設定してください。');
+    return;
+  }
+
+  const values = {};
+  FIELDS.forEach(([id]) => values[id] = document.getElementById(id).value.trim());
+  if (!FIELDS.some(([id]) => values[id])) {
+    setStatus('err', '⚠ 何か入力してください。');
+    return;
+  }
+
+  const dateStr = document.getElementById('date-display').textContent;
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  showProgress(true);
+
+  // ── Step 1: Claude でフォーマット ──
+  setStep(1, 'active');
+  const prompt = `以下は${dateStr}の日次ログです。各セクションの内容を整理・補完し、以下のJSONのみを返してください（コードブロック不要）:
 {"title":"タイトル（日付+簡潔なサマリー）","summary":"今日全体の1〜2文のサマリー","standup_report":"整形済みテキスト","standup_meeting":"整形済みテキスト","tasks":"整形済みテキスト","questions":"整形済みテキスト","learnings":"整形済みテキスト","memo":"整形済みテキスト"}
 
 ---
 [Standup - To Report]
-${values['standup-report']||'(なし)'}
+${values['standup-report'] || '(なし)'}
 [Standup - Meeting Notes]
-${values['standup-meeting']||'(なし)'}
+${values['standup-meeting'] || '(なし)'}
 [Tasks Completed]
-${values['tasks']||'(なし)'}
+${values['tasks'] || '(なし)'}
 [To Investigate]
-${values['questions']||'(なし)'}
+${values['questions'] || '(なし)'}
 [Knowledge Gained]
-${values['learnings']||'(なし)'}
+${values['learnings'] || '(なし)'}
 [Memo]
-${values['memo']||'(なし)'}`;
+${values['memo'] || '(なし)'}`;
 
   let parsed;
-  try{
-    const r=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'x-api-key':apiKey,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:prompt}]}),
-    });
-    if(!r.ok){const e=await r.json();throw new Error(e.error?.message||r.status);}
-    const data=await r.json();
-    const raw=data.content.find(b=>b.type==='text')?.text||'{}';
-    parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());
-    setStep(1,'done');
-  }catch(e){
-    showProgress(false);btn.disabled=false;
-    setStatus('err','✗ Claude API エラー: '+e.message);return;
-  }
-
-  // Step 2: format
-  setStep(2,'active');
-  const blocks=buildBlocks(parsed);
-  await new Promise(r=>setTimeout(r,300));
-  setStep(2,'done');
-
-  // Step 3: Notion
-  setStep(3,'active');
-  try{
-    const r=await fetch('https://api.notion.com/v1/pages',{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+notionToken,'Content-Type':'application/json','Notion-Version':'2022-06-28'},
-      body:JSON.stringify({
-        parent:{database_id:notionDb},
-        properties:{Name:{title:[{text:{content:parsed.title||`📝 ${dateStr} Daily Log`}}]}},
-        children:blocks,
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }],
       }),
     });
-    if(r.ok){
-      const nd=await r.json();
-      setStep(3,'done');
-      setStatus('ok',`✓ Notionに保存しました\n→ ${nd.url}\n\n📋 ${parsed.summary||''}`);
-      localStorage.removeItem(DRAFT_KEY);
-    }else{
-      const e=await r.json();throw new Error(e.message||r.status);
-    }
-  }catch(e){
-    showProgress(false);btn.disabled=false;
-    setStatus('err','✗ Notion保存エラー: '+e.message);return;
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message || r.status); }
+    const data = await r.json();
+    const raw = data.content.find(b => b.type === 'text')?.text || '{}';
+    parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+    setStep(1, 'done');
+  } catch(e) {
+    showProgress(false); btn.disabled = false;
+    setStatus('err', '✗ Claude API エラー: ' + e.message);
+    return;
   }
-  btn.disabled=false;
+
+  // ── Step 2: ブロック生成 ──
+  setStep(2, 'active');
+  const blocks = buildBlocks(parsed);
+  await new Promise(r => setTimeout(r, 300));
+  setStep(2, 'done');
+
+  // ── Step 3: Notion へ保存（Worker経由） ──
+  setStep(3, 'active');
+  try {
+    const r = await fetch(WORKER_URL + '/v1/pages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Notion-Version': '2022-06-28',
+        // Authorization はWorkerの環境変数から付与されるため不要
+      },
+      body: JSON.stringify({
+        parent: { database_id: notionDb },
+        properties: {
+          Name: { title: [{ text: { content: parsed.title || `📝 ${dateStr} Daily Log` } }] },
+        },
+        children: blocks,
+      }),
+    });
+    if (r.ok) {
+      const nd = await r.json();
+      setStep(3, 'done');
+      setStatus('ok', `✓ Notionに保存しました\n→ ${nd.url}\n\n📋 ${parsed.summary || ''}`);
+      localStorage.removeItem(DRAFT_KEY);
+    } else {
+      const e = await r.json();
+      throw new Error(e.message || r.status);
+    }
+  } catch(e) {
+    showProgress(false); btn.disabled = false;
+    setStatus('err', '✗ Notion保存エラー: ' + e.message);
+    return;
+  }
+
+  btn.disabled = false;
 }
 
-function buildBlocks(p){
-  const sect=(emoji,label,text)=>(!text||text==='(なし)')?[]:[
-    {object:'block',type:'heading_3',heading_3:{rich_text:[{type:'text',text:{content:`${emoji} ${label}`}}]}},
-    {object:'block',type:'paragraph',paragraph:{rich_text:[{type:'text',text:{content:text}}]}},
-    {object:'block',type:'divider',divider:{}},
-  ];
-  return [
-    p.summary?{object:'block',type:'callout',callout:{rich_text:[{type:'text',text:{content:p.summary}}],icon:{emoji:'📋'}}}:null,
-    p.summary?{object:'block',type:'divider',divider:{}}:null,
-    ...sect('📢','Standup — To Report',p.standup_report),
-    ...sect('📋','Standup — Meeting Notes',p.standup_meeting),
-    ...sect('✅','Tasks Completed',p.tasks),
-    ...sect('❓','To Investigate',p.questions),
-    ...sect('💡','Knowledge Gained',p.learnings),
-    ...sect('💬','Memo',p.memo),
-  ].filter(Boolean);
+function clearAll() {
+  if (!confirm('Clear all entries?')) return;
+  FIELDS.forEach(([id, ctId]) => {
+    document.getElementById(id).value = '';
+    document.getElementById(ctId).textContent = '0';
+  });
+  localStorage.removeItem(DRAFT_KEY);
+  clearStatus();
+  showProgress(false);
 }
 
-function clearAll(){
-  if(!confirm('Clear all entries?'))return;
-  FIELDS.forEach(([id,ctId])=>{document.getElementById(id).value='';document.getElementById(ctId).textContent='0';});
-  localStorage.removeItem(DRAFT_KEY);clearStatus();showProgress(false);
-}
-
-loadConfig();loadDraft();
+loadConfig();
+loadDraft();
 </script>
 </body>
 </html>
